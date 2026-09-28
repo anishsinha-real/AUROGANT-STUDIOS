@@ -1,7 +1,7 @@
 import express from 'express';
 import crypto from 'crypto';
 import { createOrder, findOrder } from '../utils/store.js';
-import { AUR_PRODUCTS } from '../utils/productCatalog.js';
+const PRICES={UH62:999,UA30:799,UA26:749,FC32:449,UH38:899,UH83:1099,UH32:799,UH35:899,UH26:699,UJ31:1299,UC61:549,UA22:499,UB73:699,UC21:395,MP25:599,UC28:799,UR37:449,UR50:499,UR39:449,UC23:699,UT58:599,UV34:449};
 
 const router = express.Router();
 const makeId=()=>`AUR-${Date.now().toString(36).toUpperCase()}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
@@ -11,13 +11,13 @@ function calculate(items){
  if(!Array.isArray(items)||!items.length) throw new Error('At least one item is required.');
  let subtotal=0;
  const normalized=items.map(raw=>{
-  const p=AUR_PRODUCTS.find(x=>x.code===String(raw.code||'').toUpperCase());
-  if(!p) throw new Error(`Product not found: ${raw.code}`);
+  const code=String(raw.code||'').toUpperCase(), basePrice=PRICES[code];
+  if(!basePrice) throw new Error(`Product not found: ${raw.code}`);
   const quantity=Math.max(1,Math.min(100,Number(raw.quantity)||1));
   const objects=Math.max(0,Math.min(20,Number(raw.designObjectCount)||0));
   const print=objects?99+25*Math.max(0,objects-1):0;
-  const price=Number(p.salePrice||p.price)+print; subtotal+=price*quantity;
-  return {...raw,code:p.code,name:p.name,basePrice:Number(p.salePrice||p.price),unitPrice:price,printCharge:print,quantity};
+  const price=basePrice+print; subtotal+=price*quantity;
+  return {...raw,code,name:String(raw.name||code),basePrice,unitPrice:price,printCharge:print,quantity};
  });
  const shipping=subtotal>=FREE?0:SHIPPING, gst=Math.round(subtotal*GST/100);
  return {items:normalized,totals:{subtotal,shipping,gst,total:subtotal+shipping+gst}};
