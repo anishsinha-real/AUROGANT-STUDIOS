@@ -14,6 +14,7 @@ import adminRoutes from './routes/admin.js';
 import contentRoutes from './routes/content.js';
 import authRoutes from './routes/authRoutes.js';
 import userRoutes from './routes/userRoutes.js';
+import designRoutes from './routes/designs.js';
 
 const app = express();
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
