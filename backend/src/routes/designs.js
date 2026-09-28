@@ -1,0 +1,10 @@
+import express from "express";
+import crypto from "crypto";
+import Design from "../models/Design.js";
+import { protect } from "../middleware/authMiddleware.js";
+const router=express.Router();
+const id=()=>`D-${Date.now().toString(36).toUpperCase()}-${crypto.randomBytes(3).toString("hex").toUpperCase()}`;
+router.post("/",async(req,res)=>{try{const{designId,productCode,color,size,quantity,views,preview}=req.body;if(!productCode||!views)return res.status(400).json({success:false,message:"Product and design data are required."});const d=await Design.findOneAndUpdate({designId:designId||id()},{designId:designId||id(),user:req.user?._id||null,productCode,color,size,quantity:Math.max(1,Number(quantity)||1),views,preview,status:"saved"},{upsert:true,new:true,setDefaultsOnInsert:true});res.status(201).json({success:true,design:d});}catch(e){res.status(400).json({success:false,message:e.message})}});
+router.get("/mine",protect,async(req,res)=>res.json({success:true,designs:await Design.find({user:req.user._id}).sort({updatedAt:-1}).lean()}));
+router.get("/:id",async(req,res)=>{const d=await Design.findOne({designId:req.params.id}).lean();if(!d)return res.status(404).json({success:false,message:"Design not found"});res.json({success:true,design:d})});
+export default router;
