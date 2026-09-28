@@ -1,31 +1,27 @@
 import express from 'express';
 import crypto from 'crypto';
+import { findOrder, updateOrder } from '../utils/store.js';
+const router=express.Router();
 
-const router = express.Router();
-
-router.post('/create', async (req, res) => {
-  const { amount, receipt } = req.body;
-  if (!amount || Number(amount) <= 0) return res.status(400).json({ success: false, message: 'Invalid amount.' });
-
-  if (!process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_KEY_SECRET) {
-    return res.json({ success: true, mode: 'demo', keyId: null, orderId: `demo_${Date.now()}`, amount: Math.round(Number(amount) * 100), currency: 'INR' });
-  }
-
-  const auth = Buffer.from(`${process.env.RAZORPAY_KEY_ID}:${process.env.RAZORPAY_KEY_SECRET}`).toString('base64');
-  const response = await fetch('https://api.razorpay.com/v1/orders', {
-    method: 'POST', headers: { Authorization: `Basic ${auth}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ amount: Math.round(Number(amount) * 100), currency: 'INR', receipt: receipt || `aur_${Date.now()}` })
-  });
-  const data = await response.json();
-  if (!response.ok) return res.status(502).json({ success: false, message: data.error?.description || 'Razorpay order creation failed.' });
-  res.json({ success: true, mode: 'live', keyId: process.env.RAZORPAY_KEY_ID, orderId: data.id, amount: data.amount, currency: data.currency });
+router.post('/create',async(req,res)=>{
+ const {amount,receipt,orderId}=req.body;if(!orderId)return res.status(400).json({success:false,message:'Order ID is required.'});
+ const order=await findOrder(orderId);if(!order)return res.status(404).json({success:false,message:'Order not found.'});
+ const expected=Number(order.totals?.total||0);if(Math.round(Number(amount)||0)!==Math.round(expected))return res.status(400).json({success:false,message:'Payment amount does not match order.'});
+ if(!process.env.RAZORPAY_KEY_ID||!process.env.RAZORPAY_KEY_SECRET)return res.status(503).json({success:false,message:'Online payments are not configured.'});
+ const auth=Buffer.from(`${process.env.RAZORPAY_KEY_ID}:${process.env.RAZORPAY_KEY_SECRET}`).toString('base64');
+ const response=await fetch('https://api.razorpay.com/v1/orders',{method:'POST',headers:{Authorization:`Basic ${auth}`,'Content-Type':'application/json'},body:JSON.stringify({amount:Math.round(expected*100),currency:'INR',receipt:receipt||orderId})});
+ const data=await response.json();if(!response.ok)return res.status(502).json({success:false,message:data.error?.description||'Razorpay order creation failed.'});
+ await updateOrder(orderId,{razorpayOrderId:data.id,status:'payment_pending',paymentStatus:'pending',updatedAt:new Date().toISOString()});
+ res.json({success:true,mode:'live',keyId:process.env.RAZORPAY_KEY_ID,orderId:data.id,amount:data.amount,currency:data.currency});
 });
-
-router.post('/verify', (req, res) => {
-  const { orderId, paymentId, signature } = req.body;
-  if (!process.env.RAZORPAY_KEY_SECRET) return res.json({ success: true, verified: true, mode: 'demo' });
-  const expected = crypto.createHmac('sha256', process.env.RAZORPAY_KEY_SECRET).update(`${orderId}|${paymentId}`).digest('hex');
-  res.json({ success: true, verified: expected === signature });
+router.post('/verify',async(req,res)=>{
+ const {orderId,paymentId,signature,razorpayOrderId}=req.body;const order=await findOrder(orderId);
+ if(!order)return res.status(404).json({success:false,verified:false,message:'Order not found.'});
+ if(!process.env.RAZORPAY_KEY_SECRET)return res.status(503).json({success:false,verified:false,message:'Payment verification is not configured.'});
+ const expected=crypto.createHmac('sha256',process.env.RAZORPAY_KEY_SECRET).update(`${razorpayOrderId}|${paymentId}`).digest('hex');
+ const verified=crypto.timingSafeEqual(Buffer.from(expected),Buffer.from(String(signature||'')));
+ await updateOrder(orderId,verified?{paymentStatus:'paid',status:'confirmed',razorpayPaymentId:paymentId}:{paymentStatus:'failed',status:'payment_failed',updatedAt:new Date().toISOString()});
+ res.json({success:true,verified});
 });
-
+router.post('/failed',async(req,res)=>{const order=await findOrder(req.body.orderId);if(!order)return res.status(404).json({success:false});await updateOrder(order.id,{paymentStatus:'failed',status:'payment_failed',updatedAt:new Date().toISOString()});res.json({success:true})});
 export default router;
